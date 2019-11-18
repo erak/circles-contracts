@@ -8,12 +8,13 @@ contract Hub {
 
     address public owner;
 
-    uint256 public issuanceRate; // = 1736111111111111; // ~1050 tokens per week
-    uint256 public demurrageRate; // = 0;
+    uint256 public inflation;
+    uint256 public divisor;
+    uint256 public period;
     string public symbol; // = 'CRC';
-    uint256 initialPayout;
+    uint256 public initialPayout;
+    uint256 public deployedAt;
 
-    mapping (address => bool) public relayers;
     mapping (address => Token) public userToToken;
     mapping (address => address) public tokenToUser;
     mapping (address => mapping (address => uint256)) public limits;
@@ -26,6 +27,7 @@ contract Hub {
         uint256 sent;
         uint256 received;
     }
+
     mapping (address => transferValidator) private validation;
     address[] private seen;
 
@@ -34,13 +36,25 @@ contract Hub {
         _;
     }
 
-    constructor(address _owner, uint256 _issuance, uint256 _demurrage, string memory _symbol, uint256 _initialPayout) public {
+    constructor(address _owner, uint256 _inflation, uint256 _divisor, uint256 _period, string memory _symbol, uint256 _initialPayout) public {
         require (_owner != address(0));
         owner = _owner;
-        issuanceRate = _issuance;
-        demurrageRate = _demurrage;
+        inflation = _inflation;
+        divisor = _divisor;
+        period = _period;
         symbol = _symbol;
         initialPayout = _initialPayout;
+        deployedAt = block.timestamp;
+    }
+
+    function periods() public view returns (uint256) {
+        return (block.timestamp.sub(deployedAt)).div(period);
+    }
+
+    function issuance() public view returns (uint256) {
+        uint256 q = pow(inflation, periods());
+        uint256 d = pow(divisor, periods());
+        return (initialPayout.mul(q)).div(d);
     }
 
     function changeOwner(address _newOwner) public onlyOwner returns (bool) {
@@ -49,21 +63,9 @@ contract Hub {
         return true;
     }
 
-    function updateRelayer(address _relayer, bool isRelayer) public onlyOwner returns (bool) {
-        require(_relayer != address(0));
-        relayers[_relayer] = isRelayer;
-        return true;
-    }
-
-    function updateIssuance(uint256 _issuance) public onlyOwner returns (bool) {
+    function updateInflation(uint256 _inflation) public onlyOwner returns (bool) {
         // safety checks on issuance go here
-        issuanceRate = _issuance;
-        return true;
-    }
-
-    function updateDemurrage(uint256 _demurrage) public onlyOwner returns (bool) {
-        // safety checks on demurrage go here
-        demurrageRate = _demurrage;
+        inflation = _inflation;
         return true;
     }
 
@@ -105,14 +107,38 @@ contract Hub {
         emit Trust(msg.sender, toTrust, limit);
     }
 
-    function checkSendLimit(address token, address from, address to) public view returns (uint256) {
-        // if sending dest's token to dest, src can send 100% of their holdings
-        if (token == to) {
-            return userToToken[token].balanceOf(from);
+    function pow(uint256 base, uint256 exponent) public pure returns (uint256) {
+        if (base == 0) {
+            return 0;
         }
+        if (exponent == 0) {
+            return 1;
+        }
+        if (exponent == 1) {
+            return base;
+        }
+        uint256 y = 1;
+        while(exponent > 1) {
+            if(exponent.mod(2) == 0) {
+                base = base.mul(base);
+                exponent = exponent.div(2);
+            } else {
+                y = base.mul(y);
+                base = base.mul(base);
+                exponent = (exponent.sub(1)).div(2);
+            }
+        }
+        return base.mul(y);
+    }
+
+    function checkSendLimit(address token, address from, address to) public view returns (uint256) {
         // if the token doesn't exist, nothing can be sent
         if (address(userToToken[token]) == address(0)) {
             return 0;
+        }
+        // if sending dest's token to dest, src can send 100% of their holdings
+        if (token == to) {
+            return userToToken[token].balanceOf(from);
         }
         uint256 max = (userToToken[token].totalSupply().mul(limits[to][token])).div(100);
         return max.sub(userToToken[token].balanceOf(to));

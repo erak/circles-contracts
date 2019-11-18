@@ -10,10 +10,10 @@ contract Token is ERC20 {
     uint8 public decimals = 18;
 
     string public name;
-    uint public lastTouched;
+    uint256 public lastTouched;
     address public hub;
-    HubI public controller;
     address public owner;
+    uint256 public initial;
 
     modifier onlyHub() {
         require(msg.sender == hub);
@@ -25,13 +25,14 @@ contract Token is ERC20 {
         _;
     }
 
-    constructor(address _owner, string memory _name, uint256 initialPayout) public {
+    constructor(address _owner, string memory _name, uint256 _initial) public {
         require(_owner != address(0));
         name = _name;
         owner = _owner;
         hub = msg.sender;
         lastTouched = time();
-        _mint(_owner, initialPayout);
+        initial = HubI(hub).issuance();
+        _mint(_owner, _initial);
     }
 
     function time() internal view returns (uint) {
@@ -42,18 +43,51 @@ contract Token is ERC20 {
         return HubI(hub).symbol();
     }
 
-    function look() public view returns (uint256) {
-        uint256 period = time().sub(lastTouched);
-        uint256 issuance = HubI(hub).issuanceRate();
-        return issuance.mul(period);
+    function inflation() public view returns (uint256) {
+        return HubI(hub).inflation();
     }
 
-    // the universal basic income part
-    function update() public {
+    function divisor() public view returns (uint256) {
+        return HubI(hub).divisor();
+    }
+
+    function period() public view returns (uint256) {
+        return HubI(hub).period();
+    }
+
+    function periods() public view returns (uint256) {
+        if (block.timestamp.sub(lastTouched) == period()) return 1;
+        if (block.timestamp.sub(lastTouched) < period()) return 0;
+        return (block.timestamp.sub(lastTouched)).div(period());
+    }
+
+    function look() public view returns (uint256) {
+        uint256 p = periods();
+        if (p == 0) return 0;
+        if (p == 1) return HubI(hub).issuance();
+        uint256 div = divisor();
+        uint256 inf = inflation();
+        uint256 q = HubI(hub).pow(inf, p);
+        uint256 d = HubI(hub).pow(div, p);
+        uint256 mid = q.sub(d);
+        uint256 q1 = div.mul(initial).mul(mid);
+        uint256 q2 = inf.sub(div);
+        uint256 bal = q1.div(q2);
+        return (bal.div(d)).sub(initial);
+    }
+
+    function updateTime() internal {
+        uint256 sec = period().mul(periods());
+        lastTouched = lastTouched.add(sec);
+    }
+
+    function update() public returns (uint256) {
         uint256 gift = look();
-        //this._mint(cast(gift));
-        //this.push(owner, cast(gift));
-        lastTouched = time();
+        if (gift > 0) {
+            updateTime();
+            initial = HubI(hub).issuance();
+            _mint(owner, gift);
+        }
     }
 
     function hubTransfer(
@@ -63,7 +97,9 @@ contract Token is ERC20 {
     }
 
     function transfer(address dst, uint wad) public returns (bool) {
-        update();
+        if (msg.sender == owner) {
+            update();
+        }
         return super.transfer(dst, wad);
     }
 
@@ -72,15 +108,15 @@ contract Token is ERC20 {
     }
 
     function totalSupply() public view returns (uint256) {
-        return super.totalSupply();//.add(look());
+        return super.totalSupply().add(look());
     }
 
     function balanceOf(address src) public view returns (uint256) {
         uint256 balance = super.balanceOf(src);
 
-        //if (src == owner) {
-        //    balance = balance.add(look());
-        //}
+        if (src == owner) {
+           balance = balance.add(look());
+        }
 
         return balance;
     }

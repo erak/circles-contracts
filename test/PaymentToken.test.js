@@ -21,14 +21,15 @@ contract('Token payments', ([_, owner, recipient, anotherAccount, systemOwner]) 
   let safe = null;
   let token = null;
 
-  const issuance = bn(1736111111111111);
-  const demurrage = bn(0);
+  const inflation = bn(275);
+  const divisor = bn(100);
+  const period = bn(7885000000);
   const symbol = 'CRC';
   const tokenName = 'MyCoin';
   const initialPayout = convertToBaseUnit(100);
 
   beforeEach(async () => {
-    hub = await Hub.new(systemOwner, issuance, demurrage, symbol, initialPayout);
+    hub = await Hub.new(systemOwner, inflation, divisor, period, symbol, initialPayout);
 
     safe = await GnosisSafe.new({ from: owner });
     await safe.setup([owner], 1, ZERO_ADDRESS, '0x', ZERO_ADDRESS, 0, ZERO_ADDRESS, { from: systemOwner });
@@ -47,7 +48,7 @@ contract('Token payments', ([_, owner, recipient, anotherAccount, systemOwner]) 
 
   describe('user can use their token as payment token', () => {
     const amount = convertToBaseUnit(50);
-    const gasCosts = bn(37567);
+    const gasCosts = bn(35508);
 
     it('should transfer tokens', async () => {
       const to = token.address;

@@ -5,6 +5,7 @@ const expectEvent = require('./helpers/expectEvent');
 const safeArtifacts = require('@circles/safe-contracts/build/contracts/GnosisSafe.json');
 const proxyArtifacts = require('@circles/safe-contracts/build/contracts/ProxyFactory.json');
 const { BigNumber, ZERO_ADDRESS } = require('./helpers/constants');
+const { getTimestamp } = require('./helpers/getTimestamp');
 const { bn } = require('./helpers/math');
 
 require('chai')
@@ -23,14 +24,15 @@ contract('Hub', ([_, systemOwner, attacker, safeOwner, normalUser, thirdUser, fo
   let safe = null;
   let proxyFactory = null;
 
-  const issuance = bn(1736111111111111);
-  const demurrage = bn(0);
+  const inflation = bn(275);
+  const divisor = bn(100);
+  const period = bn(7885000000);
   const symbol = 'CRC';
   const initialPayout = bn(100);
   const tokenName = 'testToken';
 
   beforeEach(async () => {
-    hub = await Hub.new(systemOwner, issuance, demurrage, symbol, initialPayout);
+    hub = await Hub.new(systemOwner, inflation, divisor, period, symbol, initialPayout);
     safe = await GnosisSafe.new({ from: systemOwner });
     proxyFactory = await ProxyFactory.new({ from: systemOwner });
     await safe.setup([systemOwner], 1, ZERO_ADDRESS, '0x', ZERO_ADDRESS, 0, ZERO_ADDRESS, { from: systemOwner });
@@ -44,20 +46,12 @@ contract('Hub', ([_, systemOwner, attacker, safeOwner, normalUser, thirdUser, fo
     await assertRevert(hub.changeOwner(attacker, { from: attacker }));
   });
 
-  it('has an issuance rate', async () => {
-    (await hub.issuanceRate()).should.be.bignumber.equal(issuance);
+  it('has an inflation rate', async () => {
+    (await hub.inflation()).should.be.bignumber.equal(inflation);
   });
 
-  it('attacker cannot change issuance', async () => {
-    await assertRevert(hub.updateIssuance(42, { from: attacker }));
-  });
-
-  it('has a demurrage rate', async () => {
-    (await hub.demurrageRate()).should.be.bignumber.equal(demurrage);
-  });
-
-  it('attacker cannot change demurrage', async () => {
-    await assertRevert(hub.updateDemurrage(42, { from: attacker }));
+  it('attacker cannot change inflation', async () => {
+    await assertRevert(hub.updateInflation(42, { from: attacker }));
   });
 
   it('has a symbol', async () => {
@@ -68,22 +62,22 @@ contract('Hub', ([_, systemOwner, attacker, safeOwner, normalUser, thirdUser, fo
     await assertRevert(hub.updateSymbol('PLUM', { from: attacker }));
   });
 
+  it('has the right deployed time', async () => {
+    const timestamp = await getTimestamp(hub.transactionHash, web3);
+    const deployed = await hub.deployedAt();
+    (bn(timestamp)).should.be.bignumber.equal(deployed);
+  });
+
   describe('owner can change system vars', async () => {
     after(async () => {
-      await hub.updateIssuance(issuance, { from: systemOwner });
-      await hub.updateDemurrage(demurrage, { from: systemOwner });
+      await hub.updateInflation(inflation, { from: systemOwner });
       await hub.updateSymbol(symbol, { from: systemOwner });
     });
 
 
-    it('owner can change issuance', async () => {
-      await hub.updateIssuance(1, { from: systemOwner });
-      (await hub.issuanceRate()).should.be.bignumber.equal(bn(1));
-    });
-
-    it('owner can change demurrage', async () => {
-      await hub.updateDemurrage(1, { from: systemOwner });
-      (await hub.demurrageRate()).should.be.bignumber.equal(bn(1));
+    it('owner can change inflation', async () => {
+      await hub.updateInflation(1, { from: systemOwner });
+      (await hub.inflation()).should.be.bignumber.equal(bn(1));
     });
 
     it('owner can change symbol', async () => {
@@ -282,6 +276,11 @@ contract('Hub', ([_, systemOwner, attacker, safeOwner, normalUser, thirdUser, fo
       it('checkSendLimit returns the correct amount for self-send', async () => {
         (await hub.checkSendLimit(safeOwner, safeOwner, safeOwner))
           .should.be.bignumber.equal(bn(100));
+      });
+
+      it('checkSendLimit returns the correct amount for token that isnt deployed', async () => {
+        (await hub.checkSendLimit(ZERO_ADDRESS, safeOwner, safeOwner))
+          .should.be.bignumber.equal(bn(0));
       });
     });
 
